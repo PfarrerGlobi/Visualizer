@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Data Visualization</title>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+
+th {
+    position: relative;
+    padding-right: 25px; /* Increased space for the arrow. Adjust as necessary. */
+}
+
+th.sorted-asc::after, th.sorted-desc::after {
+    content: '';
+    position: absolute;
+    top: 50%; /* Center vertically */
+    right: 8px; /* Adjust based on your preference. This determines how far from the right edge the arrow appears. */
+    transform: translateY(-50%); /* Shift up by half of its height for vertical centering */
+}
+
+th.sorted-asc::after {
+    content: '';
+    color: blue;
+}
+
+th.sorted-desc::after {
+    content: '';
+    color: green;
+}
+
+/* Simple styling for the table */
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+table, th, td {
+    border: 1px solid black;
+    padding: 8px;
+    text-align: center;
+}
+
+
+        .dark-mode {
+    background-color: #121212;
+    color: #e0e0e0;
+}
+
+.dark-mode table, .dark-mode th, .dark-mode td {
+    border-color: #444;
+}
+
+.dark-mode button {
+    background-color: #333;
+    color: #e0e0e0;
+}
+
+.dark-mode input[type="text"], .dark-mode input[type="date"], .dark-mode select {
+    background-color: #333;
+    color: #e0e0e0;
+    border: 1px solid #444;
+}
+
+.dark-mode input[type="checkbox"]:before {
+    color: #444;
+}
+    </style>
+</head>
+<button id="darkModeToggle">Toggle Dark Mode</button>
+<body>
+    <input id="csvFile" type="file" multiple style="display: none;">
+    <button id="uploadCsv">Upload CSVs</button>
+    <select id="csvSelect"></select>
+    <label for="leverageRatio">Leverage Ratio:</label>
+    <input id="leverageRatio" type="text" value="1.0" pattern="^[0-9]*\.?[0-9]+$" title="Only decimal numbers allowed">
+
+    <button id="getData">Get Data</button>
+    <input type="checkbox" id="enableWeekend" name="enableWeekend">
+    <label for="enableWeekend"> enable weekend </label><br>
+    <input type="checkbox" id="logScale" name="logScale">
+    <label for="logScale"> Logarithmic scale</label><br>
+    
+    <div id="plot-all"></div>
+    <div id="ideal-plot"></div>
+    <div id="plot-mm"></div>
+    <div id="plot-dd"></div>
+    <br/>
+    
+    <div id="drawdown-result">Maximum Drawdown: <span id="drawdown-value">-</span></div>
+    <label for="triggerDateStart">Trigger Date Start:</label>
+<input type="date" id="triggerDateStart">
+<label for="triggerDateEnd">Trigger Date End:</label>
+<input type="date" id="triggerDateEnd">
+<label for="closeDateStart">Close Date Start:</label>
+<input type="date" id="closeDateStart">
+<label for="closeDateEnd">Close Date End:</label>
+<input type="date" id="closeDateEnd">
+<button id="filterDates">Filter Dates</button>
+<br/><br/>
+<input type="checkbox" id="collapse-table" name="collapse-table">
+    <label for="collapse-table"> hide table</label>
+    <!-- Table to display the trades -->
+    <table id="trade-table">
+        <thead>
+            <tr>
+                <!-- Headers for the trade attributes -->
+                <th>Id</th>
+                <th>Trigger Date</th>
+                <th>Expiration Date</th>
+                <th>Open Date</th>
+                <th>Close Date</th>
+                <th>Ticker</th>
+                <th>Direction</th>
+                <th>Trigger Price</th>
+                <th>Stop Price</th>
+                <th>Target Price</th>
+                <th>Percentage</th>
+                <th>Activated</th>
+                <th>Equity</th>
+                <th>Risk Percentage</th>
+                <th>Entry Equity</th>
+                <th>Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Content will be filled with jQuery -->
+        </tbody>
+    </table>
+    <button id="downloadCSV">Download Table as CSV</button>
+
+    <!-- Table to display the ticker rankings -->
+<h2>Ticker Ranking</h2>
+<input type="checkbox" id="collapse-ranking-table" name="collapse-ranking-table">
+    <label for="collapse-ranking-table"> hide ranking table</label>
+<table id="ticker-ranking-table">
+    <thead>
+        <tr>
+            <th>Ticker</th>
+            <th>Winrate</th>
+            <th>Absolute Rate</th>
+        </tr>
+    </thead>
+    <tbody>
+        <!-- Content will be filled with jQuery -->
+    </tbody>
+</table>
+<button id="downloadRankingCSV">Download Ranking as CSV</button>
+
+
+    <script>
+        $(document).ready(function() {
+            var isLogScale = false;
+            
+           
+
+            $('#logScale').change(function() {
+                isLogScale = this.checked;
+                $("#getData").click();  // Trigger data fetch and re-plotting
+            });
+
+
+            $('#collapse-ranking-table').change(function() {
+
+                    if (this.checked){
+                         $('#ticker-ranking-table tbody tr').hide();
+
+                                } else {
+                        $('#ticker-ranking-table tbody tr').show();
+                            }
+                                });
+
+            $('#collapse-table').change(function() {
+
+                if (this.checked){
+                    $('#trade-table tbody tr').hide();
+
+                } else {
+                    $('#trade-table tbody tr').show();
+                }
+
+            
+                
+                    
+    
+
+            });
+
+            
+
+            $.get("http://localhost:8080/list-csv", function(response, status) {
+                let dropdown = $("#csvSelect");
+                dropdown.empty();
+                response.forEach(csv => {
+                    dropdown.append(new Option(csv, csv));
+                });
+            });
+
+            $("#uploadCsv").click(function() {
+                $("#csvFile").click();
+            });
+            
+            
+
+
+
+
+
+
+
+            $("#csvFile").change(function() {
+                let files = $("#csvFile").get(0).files;
+                if (files.length > 0) {
+                    let formData = new FormData();
+                    for (let i = 0; i < files.length; i++) {
+                        formData.append('files', files[i]);
+                    }
+                    $.ajax({
+                        url: 'http://localhost:8080/upload',
+                        method: 'POST',
+                        data: formData,
+                        processData: false,
+                        contentType: false,
+                        success: function(response) {
+                            console.log(response);
+                        },
+                        error: function(xhr) {
+                            console.log(xhr);
+                        }
+                    });
+                }
+            });
+
+            $("#getData").click(function() {
+                let selectedCsv = $("#csvSelect").val();
+                let leverageRatio = $("#leverageRatio").val();
+
+                if (!leverageRatio) {
+                    alert("Please enter a valid leverage ratio.");
+                    return;
+                }
+             /*   $.get(`http://localhost:8080/ideal-data?filename=${selectedCsv}&lr=${leverageRatio}`, function(response, status) {
+                    plotDataWithLabels('ideal-plot', response.all, 'Ideal Equity Curve');
+                    
+
+                });*/
+
+                let startDate = $('#triggerDateStart').val();
+                let endDate =  $('#triggerDateEnd').val();
+
+
+                $.get(`http://localhost:8080/data?filename=${selectedCsv}&lr=${leverageRatio}&enableWeekend=${enableWeekend.checked}&startDateString=${startDate}&endDateString=${endDate}`
+                , function(response, status) {
+                    plotDataWithLabels('plot-all', response.all, 'All Data Points');
+                    plotData('plot-mm', response.mm, 'Months');
+                    plotData('plot-dd', response.dd, 'Days');
+
+                    $.get("http://localhost:8080/drawdown", function(drawdownResponse) {
+                        $('#drawdown-value').text(drawdownResponse);
+                    });
+
+                    
+
+                    
+                    
+                    // Fetching the table data
+                    $.get("http://localhost:8080/table", function(allTrades) {
+                        $("#trade-table tbody").empty();
+                        let trades = filterTradesByDate(allTrades);
+
+                        let triggerDateStart = $("#triggerDateStart").val();
+                        let triggerDateEnd = $("#triggerDateEnd").val();
+                        let closeDateStart = $("#closeDateStart").val();
+                        let closeDateEnd = $("#closeDateEnd").val();
+
+                        for (let id in trades) {
+                            let trade = trades[id];
+
+                            if (dateInRange(new Date(trade.triggerDate), triggerDateStart, triggerDateEnd) &&
+                             dateInRange(new Date(trade.closeDate), closeDateStart, closeDateEnd)) {
+                            let row = "<tr>";
+                                row += `<td>${trade.id}</td>`;
+                        row += `<td>${trade.triggerDate}</td>`;
+                        row += `<td>${trade.expirationDate}</td>`;
+                        row += `<td>${trade.openDate}</td>`;
+                        row += `<td>${trade.closeDate}</td>`;
+                        row += `<td>${trade.ticker}</td>`;
+                        row += `<td>${trade.direction}</td>`;
+                        row += `<td>${trade.triggerPrice}</td>`;
+                        row += `<td>${trade.stopPrice}</td>`;
+                        row += `<td>${trade.targetPrice}</td>`;
+                        row += `<td>${trade.percentage}</td>`;
+                        row += `<td>${trade.activated}</td>`;
+                        row += `<td>${trade.equity}</td>`;
+                        row += `<td>${trade.risk_percentage}</td>`;
+                        row += `<td>${trade.entryEquity}</td>`;
+                        row += `<td>${trade.result}</td>`;
+                        row += "</tr>";
+                            $("#trade-table tbody").append(row);
+                             }
+                        }
+                        if (typeof callback === 'function') {
+                            callback(trades);
+       }
+                        populateTickerRanking(trades);
+                    });
+                    
+                    
+                   
+
+
+
+                });
+                $("#filterDates").click(function() {
+                        $("#getData").click();
+                                            });
+                        $("#darkModeToggle").click(function() {
+                                 $("body").toggleClass("dark-mode");
+                                                });
+                                                $("#downloadCSV").click(function() {
+    let csvContent = "data:text/csv;charset=utf-8,";
+
+    // Extract headers
+    csvContent += $("#trade-table thead tr").map(function() {
+        return $(this).find('th').map(function() {
+            return $(this).text();
+        }).get().join(",");
+    }).get() + "\n";
+
+    // Extract row data
+    csvContent += $("#trade-table tbody tr").map(function() {
+        return $(this).find('td').map(function() {
+            return $(this).text();
+        }).get().join(",");
+    }).get().join("\n");
+
+    let encodedUri = encodeURI(csvContent);
+    let link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "trade_table.csv");
+    document.body.appendChild(link); 
+
+    link.click(); // This will download the CSV
+});
+
+$("#downloadRankingCSV").click(function() {
+    let csvContent = "data:text/csv;charset=utf-8,";
+
+    // Extract headers
+    csvContent += $("#ticker-ranking-table thead tr").map(function() {
+        return $(this).find('th').map(function() {
+            return $(this).text();
+        }).get().join(",");
+    }).get() + "\n";
+
+    // Extract row data
+    csvContent += $("#ticker-ranking-table tbody tr").map(function() {
+        return $(this).find('td').map(function() {
+            return $(this).text();
+        }).get().join(",");
+    }).get().join("\n");
+
+    let encodedUri = encodeURI(csvContent);
+    let link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "ticker_ranking_table.csv");
+    document.body.appendChild(link); 
+
+    link.click(); // This will download the CSV
+});
+
+
+function loadIdealCurve(){
+    $.get(`http://localhost:8080/ideal-data?filename=${selectedCsv}&lr=${leverageRatio}`, function(response, status) {
+                    plotDataWithLabels('ideal-plot', response.all, 'Ideal Equity Curve');
+                    
+
+                });
+}
+
+function sortTableOnHeaderClick(tableId) {
+    const table = $(`#${tableId}`);
+    const tbody = table.find('tbody');
+    const headers = table.find('th');
+
+    headers.each(function (columnIndex) {
+        $(this).click(function () {
+            const rows = tbody.find('tr').toArray();
+
+            rows.sort((a, b) => {
+                let cellA = $(a).find('td').eq(columnIndex).text();
+                let cellB = $(b).find('td').eq(columnIndex).text();
+
+                // Check if the content is a percentage
+                if (cellA.includes('%') && cellB.includes('%')) {
+                    cellA = parseFloat(cellA.replace('%', ''));
+                    cellB = parseFloat(cellB.replace('%', ''));
+                    return cellA - cellB;
+                }
+
+                // Check if the content is numerical
+                else if ($.isNumeric(cellA) && $.isNumeric(cellB)) {
+                    return Number(cellA) - Number(cellB);
+                } else {
+                    return cellA.localeCompare(cellB);
+                }
+            });
+
+            // Check if the column is already sorted in ascending order
+            // If yes, reverse to get descending order
+            if ($(this).hasClass('sorted-asc')) {
+                rows.reverse();
+                $(this).removeClass('sorted-asc');
+                $(this).addClass('sorted-desc');
+            } else {
+                $(this).addClass('sorted-asc');
+            }
+
+            // Clear any previous sorted class from other columns
+            headers.not(this).removeClass('sorted-asc sorted-desc');
+
+            // Append the sorted rows to the table body
+            tbody.append(rows);
+        });
+    });
+}
+
+sortTableOnHeaderClick('ticker-ranking-table');
+            sortTableOnHeaderClick('trade-table');
+
+                                                        });
+
+            function plotDataWithLabels(divId, data, title) {
+                if ($('#' + divId).length == 0) {
+                    $("#ema-plots").append('<div id="' + divId + '"></div>');
+                }
+                let xValues = Array.from({ length: data.length }, (_, i) => i + 1);
+                
+
+                $.get("http://localhost:8080/labels", function(labels) {
+                    let colors = labels.map(point => {
+                         if (point.connectedToWeekend) {
+                                      return 'orange';
+                                             }
+                             return point.isWeekday ? 'green' : 'red';
+                                             });
+                    
+                    let trace = {
+                        x: xValues,
+                        y: data,
+                        mode: 'markers',
+                        type: 'scatter',
+                        text: labels.map(point => point.date), 
+                        hoverinfo: 'text+y' ,
+                        marker: {
+                        color: colors
+                                        }
+                    };
+
+                    let layout = {
+                        title: title,
+                        xaxis: {
+                            title: 'X',
+                            showgrid: true,
+                            zeroline: true,
+                            type: 'linear'
+                        },
+                        yaxis: {
+                            title: 'Y',
+                            showline: true,
+                            type: isLogScale ? 'log' : 'linear'
+                        }
+                    };
+
+                    Plotly.newPlot(divId, [trace], layout);
+                });
+            }
+
+            function plotIdealDataWithLabels(divId, data, title) {
+                if ($('#' + divId).length == 0) {
+                    $("#ema-plots").append('<div id="' + divId + '"></div>');
+                }
+                let xValues = Array.from({ length: data.length }, (_, i) => i + 1);
+                
+
+                $.get("http://localhost:8080/labels", function(labels) {
+                    let colors = labels.map(point => {
+                         if (point.connectedToWeekend) {
+                                      return 'orange';
+                                             }
+                             return point.isWeekday ? 'green' : 'red';
+                                             });
+                    
+                    let trace = {
+                        x: xValues,
+                        y: data,
+                        mode: 'markers',
+                        type: 'scatter',
+                        text: labels.map(point => point.date), 
+                        hoverinfo: 'text+y' ,
+                        marker: {
+                        color: colors
+                                        }
+                    };
+
+                    let layout = {
+                        title: title,
+                        xaxis: {
+                            title: 'X',
+                            showgrid: true,
+                            zeroline: true,
+                            type: 'linear'
+                        },
+                        yaxis: {
+                            title: 'Y',
+                            showline: true,
+                            type: isLogScale ? 'log' : 'linear'
+                        }
+                    };
+
+                    Plotly.newPlot(divId, [trace], layout);
+                });
+            }
+
+
+            function dateInRange(date, startDate, endDate) {
+    return (!startDate || date >= new Date(startDate)) && (!endDate || date <= new Date(endDate));
+
+            
+}
+
+            function plotData(divId, data, title) {
+                if ($('#' + divId).length == 0) {
+                    $("#ema-plots").append('<div id="' + divId + '"></div>');
+                }
+                let xValues = Array.from({ length: data.length }, (_, i) => i + 1);
+                let trace = {
+                    x: xValues,
+                    y: data,
+                    mode: 'markers',
+                    type: 'scatter'
+                };
+
+                let layout = {
+                    title: title,
+                    xaxis: {
+                        title: 'X',
+                        showgrid: true,
+                        zeroline: true,
+                        type: 'linear'
+                    },
+                    yaxis: {
+                        title: 'Y',
+                        showline: true,
+                        type: isLogScale ? 'log' : 'linear'
+                    }
+                };
+
+                Plotly.newPlot(divId, [trace], layout);
+            }
+            function populateTickerRanking(trades) {
+    let tickerStats = {};
+
+    
+    let totalTrades = 0;
+    let totalWinners = 0;
+
+    // Aggregate the statistics for each ticker
+    for (let id in trades) {
+        let trade = trades[id];
+        totalTrades++;
+
+        if (trade.result === "winner") {
+            totalWinners++;
+        }
+
+        if (!tickerStats[trade.ticker]) {
+            tickerStats[trade.ticker] = {
+                total: 0,
+                winners: 0
+            };
+        }
+
+        tickerStats[trade.ticker].total += 1;
+        if (trade.result === "winner") {
+            tickerStats[trade.ticker].winners += 1;
+        }
+    }
+
+    // Calculate the overall winrate
+    let overallWinrate = (totalWinners / totalTrades) * 100;
+
+    // Update the Ticker Ranking title with the overall winrate
+    $("h2").text(`Ticker Ranking (Overall Winrate: ${overallWinrate.toFixed(2)}%)`);
+    tickerStats = {};
+
+    // Aggregate the statistics for each ticker
+    for (let id in trades) {
+        let trade = trades[id];
+        if (!tickerStats[trade.ticker]) {
+            tickerStats[trade.ticker] = {
+                total: 0,
+                winners: 0
+            };
+        }
+
+        tickerStats[trade.ticker].total += 1;
+        if (trade.result === "winner") {
+            tickerStats[trade.ticker].winners += 1;
+        }
+    }
+
+    $("#ticker-ranking-table tbody").empty();
+    for (let ticker in tickerStats) {
+        let winRate = (tickerStats[ticker].winners / tickerStats[ticker].total) * 100;
+        let absoluteRate = `${tickerStats[ticker].winners}/${tickerStats[ticker].total}`;
+        
+        let row = `<tr>
+            <td>${ticker}</td>
+            <td>${winRate.toFixed(2)}%</td>
+            <td>${absoluteRate}</td>
+        </tr>`;
+        
+        $("#ticker-ranking-table tbody").append(row);
+    }
+}
+function filterTradesByDate(trades) {
+    let filteredTrades = {};
+
+    let triggerDateStart = $("#triggerDateStart").val();
+    let triggerDateEnd = $("#triggerDateEnd").val();
+    let expirationDateStart = $("#expirationDateStart").val();
+    let expirationDateEnd = $("#expirationDateEnd").val();
+
+    for (let id in trades) {
+        let trade = trades[id];
+
+        if (dateInRange(new Date(trade.triggerDate), triggerDateStart, triggerDateEnd) &&
+            dateInRange(new Date(trade.expirationDate), expirationDateStart, expirationDateEnd)) {
+            filteredTrades[id] = trade;
+        }
+    }
+
+    return filteredTrades;
+}
+
+
+sortTableOnHeaderClick('trade-table');
+    sortTableOnHeaderClick('ticker-ranking-table');
+
+            
+        });
+    </script>
+</body>
+
+</html>
